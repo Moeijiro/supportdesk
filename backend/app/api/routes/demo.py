@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import CannedResponse, GuildConfig, InternalNote, Ticket, TicketMessage
+from app.models import CannedResponse, GuildConfig, InternalNote, Ticket, TicketMessage
 from app.db.session import get_db
 from app.services.transcript import generate_html_transcript
 

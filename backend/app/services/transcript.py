@@ -1,6 +1,6 @@
 import html
 from typing import List
-from app.db.models import Ticket, TicketMessage
+from app.models import Ticket, TicketMessage
 
 def generate_text_transcript(ticket: Ticket, messages: List[TicketMessage]) -> str:
     lines = [

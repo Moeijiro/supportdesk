@@ -4,7 +4,7 @@ from sqlalchemy import select
 from typing import List, Dict
 
 from app.db.session import get_db
-from app.db.models import Ticket
+from app.models import Ticket
 from app.schemas.analytics import OverviewStatsOut, CategoryBreakdownOut
 from app.services.sla import calculate_ticket_sla_metrics
 

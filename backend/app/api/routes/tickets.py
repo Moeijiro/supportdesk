@@ -6,7 +6,7 @@ from sqlalchemy import select, and_, func
 from typing import List, Optional
 
 from app.db.session import get_db
-from app.db.models import Ticket, TicketMessage, InternalNote, TicketAuditLog
+from app.models import Ticket, TicketMessage, InternalNote, TicketAuditLog
 from app.schemas.ticket import (
     TicketCreate, TicketOut, TicketDetailOut, TicketPriorityUpdate,
     TicketStatusUpdate, TicketClaimRequest, InternalNoteCreate, InternalNoteOut,

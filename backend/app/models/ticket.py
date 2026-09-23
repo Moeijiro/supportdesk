@@ -1,17 +1,8 @@
 import datetime
 from sqlalchemy import Column, Integer, String, Text, Boolean, DateTime, ForeignKey, Index
 from sqlalchemy.orm import relationship
-from app.db.session import Base
+from app.db.base import Base
 
-class GuildConfig(Base):
-    __tablename__ = "guild_configs"
-
-    guild_id = Column(String(32), primary_key=True, index=True)
-    guild_name = Column(String(255), nullable=False)
-    support_channel_id = Column(String(32), nullable=True)
-    staff_role_id = Column(String(32), nullable=True)
-    transcript_log_channel_id = Column(String(32), nullable=True)
-    is_enabled = Column(Boolean, default=True)
 
 class Ticket(Base):
     __tablename__ = "tickets"
@@ -48,6 +39,7 @@ class Ticket(Base):
         Index("ix_ticket_guild_number", "guild_id", "ticket_number", unique=True),
     )
 
+
 class TicketMessage(Base):
     __tablename__ = "ticket_messages"
 
@@ -62,6 +54,7 @@ class TicketMessage(Base):
 
     ticket = relationship("Ticket", back_populates="messages")
 
+
 class InternalNote(Base):
     __tablename__ = "internal_notes"
 
@@ -74,15 +67,6 @@ class InternalNote(Base):
 
     ticket = relationship("Ticket", back_populates="notes")
 
-class CannedResponse(Base):
-    __tablename__ = "canned_responses"
-
-    id = Column(Integer, primary_key=True, index=True)
-    guild_id = Column(String(32), index=True, nullable=False)
-    title = Column(String(128), nullable=False)
-    content = Column(Text, nullable=False)
-    category = Column(String(64), nullable=True)
-    usage_count = Column(Integer, default=0)
 
 class TicketAuditLog(Base):
     __tablename__ = "ticket_audit_logs"

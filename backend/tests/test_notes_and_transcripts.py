@@ -1,7 +1,7 @@
 import pytest
 import datetime
 from sqlalchemy import select
-from app.db.models import Ticket, TicketMessage, InternalNote
+from app.models import Ticket, TicketMessage, InternalNote
 from app.services.transcript import generate_text_transcript, generate_html_transcript
 from app.services.sla import calculate_ticket_sla_metrics
 from tests.conftest import TestingSessionLocal

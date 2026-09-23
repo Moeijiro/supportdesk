@@ -1,6 +1,6 @@
 import datetime
 from typing import Optional, Dict, Any, List
-from app.db.models import Ticket
+from app.models import Ticket
 
 def calculate_ticket_sla_metrics(tickets: List[Ticket]) -> Dict[str, Any]:
     first_response_times = []

@@ -4,7 +4,7 @@ from sqlalchemy import select
 from typing import List
 
 from app.db.session import get_db
-from app.db.models import CannedResponse
+from app.models import CannedResponse
 from app.schemas.canned import CannedResponseCreate, CannedResponseOut
 
 router = APIRouter()
