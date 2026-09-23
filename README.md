@@ -4,9 +4,19 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![discord.py](https://img.shields.io/badge/Discord-discord.py%20v2.4-5865F2.svg?logo=discord)](https://discordpy.readthedocs.io/)
-[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2014-black.svg?logo=next.js)](https://nextjs.org/)
+[![Next.js](https://img.shields.io/badge/Frontend-Next.js%2016-black.svg?logo=next.js)](https://nextjs.org/)
 
-> **SupportDesk** is an enterprise-grade customer support and CRM platform built around Discord. It elevates Discord ticket management into a structured help desk environment featuring category routing, agent claim/transfer workflows, private internal notes, automated HTML/plain-text transcripts, SLA tracking, and a full-featured staff dashboard.
+> **SupportDesk** is a customer support and CRM platform built around Discord. It elevates Discord ticket management into a structured help desk environment featuring category routing, agent claim/transfer workflows, private internal notes, automated HTML/plain-text transcripts, SLA tracking, and a full-featured staff dashboard.
+
+![Ticket queue](docs/screenshots/queue.png)
+
+| Ticket with conversation, notes and SLA | SLA analytics |
+| --- | --- |
+| ![Ticket](docs/screenshots/ticket.png) | ![Analytics](docs/screenshots/analytics.png) |
+| **HTML transcript (generated on close)** | **Landing page** |
+| ![Transcript](docs/screenshots/transcript.png) | ![Landing](docs/screenshots/landing.png) |
+
+<p align="center"><img src="docs/screenshots/mobile-queue.png" width="260" alt="Ticket queue on a phone" /></p>
 
 ---
 
@@ -82,10 +92,10 @@ flowchart TD
 
 ## Tech Stack
 
-- **Backend**: Python 3.11+, FastAPI, SQLAlchemy 2.0 (Async), `discord.py 2.4`, Pydantic v2, pytest
-- **Frontend**: Next.js 14, React 18, TypeScript, Tailwind CSS, Lucide Icons
+- **Backend**: Python 3.12+, FastAPI, SQLAlchemy 2.0 (async, aiosqlite), `discord.py 2.4`, Pydantic v2, pytest
+- **Frontend**: Next.js 16, React 19, TypeScript, Tailwind CSS 4, shadcn/ui (Radix), Lucide icons, Geist
 - **Database**: SQLite (Dev) / PostgreSQL (Production ready)
-- **CI/CD**: GitHub Actions CI, Ruff, Pytest-cov
+- **CI**: GitHub Actions — backend tests, then frontend lint and production build
 
 ---
 
@@ -113,7 +123,14 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Visit `http://localhost:3000` to access the SupportDesk portal.
+Visit `http://localhost:3000/dashboard` and press **Load demo tickets** (safe to press again; seeding is idempotent).
+
+### Demo walkthrough
+
+1. Open ticket **#1004** (unassigned) → **Claim ticket** → reply. The first staff reply records the first-response time and moves the ticket to *Waiting for Customer*.
+2. Tick **Simulate a customer reply** and answer as the customer — the ticket moves back to *Waiting for Staff*.
+3. Switch to **Internal notes** and add one; notes are never sent to the customer's channel.
+4. Set the status to **Closed** — resolution time is recorded, replies are locked, and the HTML/text transcript is generated.
 
 ---
 
