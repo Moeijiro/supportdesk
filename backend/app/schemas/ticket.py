@@ -1,20 +1,24 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 import datetime
 
+Category = Literal["Billing", "Technical Issue", "Purchase Question", "Account Help", "Other"]
+Status = Literal["Open", "Waiting for Staff", "Waiting for Customer", "In Progress", "Resolved", "Closed"]
+Priority = Literal["Low", "Normal", "High", "Urgent"]
+
 class TicketCreate(BaseModel):
-    customer_id: str
-    customer_name: str
-    category: str = Field(..., description="Billing, Technical Issue, Purchase Question, Account Help, Other")
+    customer_id: str = Field(..., min_length=1, max_length=32)
+    customer_name: str = Field(..., min_length=1, max_length=128)
+    category: Category
     subject: str = Field(..., min_length=3, max_length=255)
-    description: str = Field(..., min_length=5)
-    priority: str = Field("Normal", description="Low, Normal, High, Urgent")
+    description: str = Field(..., min_length=5, max_length=4000)
+    priority: Priority = "Normal"
 
 class TicketPriorityUpdate(BaseModel):
-    priority: str = Field(..., description="Low, Normal, High, Urgent")
+    priority: Priority
 
 class TicketStatusUpdate(BaseModel):
-    status: str = Field(..., description="Open, Waiting for Staff, Waiting for Customer, In Progress, Resolved, Closed")
+    status: Status
 
 class TicketClaimRequest(BaseModel):
     agent_id: str
@@ -23,7 +27,7 @@ class TicketClaimRequest(BaseModel):
 class InternalNoteCreate(BaseModel):
     staff_id: str
     staff_name: str
-    note_text: str = Field(..., min_length=1)
+    note_text: str = Field(..., min_length=1, max_length=4000)
 
 class InternalNoteOut(BaseModel):
     id: int
@@ -40,7 +44,7 @@ class TicketMessageCreate(BaseModel):
     author_id: str
     author_name: str
     is_staff: bool = False
-    content: str = Field(..., min_length=1)
+    content: str = Field(..., min_length=1, max_length=4000)
 
 class TicketMessageOut(BaseModel):
     id: int

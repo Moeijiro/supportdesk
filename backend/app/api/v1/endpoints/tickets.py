@@ -166,11 +166,18 @@ async def update_status(guild_id: str, ticket_id: int, payload: TicketStatusUpda
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found.")
 
+    previous = ticket.status
     ticket.status = payload.status
     now = datetime.datetime.utcnow()
+    if payload.status not in ("Resolved", "Closed") and previous in ("Resolved", "Closed"):
+        # Reopened: the old resolution no longer counts towards resolution time.
+        ticket.resolved_at = None
+        ticket.closed_at = None
     if payload.status == "Resolved" and not ticket.resolved_at:
         ticket.resolved_at = now
     elif payload.status == "Closed":
+        if not ticket.resolved_at:
+            ticket.resolved_at = now
         if not ticket.closed_at:
             ticket.closed_at = now
         # Generate transcript
@@ -185,7 +192,7 @@ async def update_status(guild_id: str, ticket_id: int, payload: TicketStatusUpda
         actor_id="staff",
         actor_name="Staff Member",
         action="status_changed",
-        details=f"Status set to '{payload.status}'"
+        details=f"Status changed from '{previous}' to '{payload.status}'"
     ))
     await db.commit()
     await db.refresh(ticket)
@@ -219,6 +226,9 @@ async def add_message(guild_id: str, ticket_id: int, payload: TicketMessageCreat
     ticket = res.scalar_one_or_none()
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found.")
+
+    if ticket.status == "Closed":
+        raise HTTPException(status_code=409, detail="This ticket is closed. Reopen it before replying.")
 
     now = datetime.datetime.utcnow()
     # If first staff response, record SLA timestamp
@@ -298,6 +308,9 @@ async def rate_ticket(guild_id: str, ticket_id: int, payload: TicketRatingCreate
     ticket = res.scalar_one_or_none()
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found.")
+
+    if ticket.status not in ("Resolved", "Closed"):
+        raise HTTPException(status_code=409, detail="Only resolved or closed tickets can be rated.")
 
     ticket.rating = payload.rating
     ticket.rating_comment = payload.comment
