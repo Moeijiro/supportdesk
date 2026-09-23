@@ -60,31 +60,35 @@ def generate_html_transcript(ticket: Ticket, messages: List[TicketMessage]) -> s
 <meta charset="UTF-8">
 <title>Ticket #{ticket.ticket_number} - {escaped_subject}</title>
 <style>
-  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0F172A; color: #F8FAFC; margin: 0; padding: 24px; }}
-  .container {{ max-width: 800px; margin: 0 auto; background: #1E293B; border-radius: 12px; border: 1px solid #334155; overflow: hidden; }}
-  .header {{ padding: 24px; background: #0F172A; border-bottom: 1px solid #334155; }}
-  .meta-grid {{ display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 16px; font-size: 13px; color: #94A3B8; }}
-  .description {{ padding: 20px 24px; background: #1E293B; border-bottom: 1px solid #334155; font-size: 14px; line-height: 1.6; }}
-  .messages {{ padding: 24px; display: flex; flex-direction: column; gap: 16px; }}
-  .message {{ padding: 14px 18px; border-radius: 8px; font-size: 14px; line-height: 1.5; }}
-  .staff-msg {{ background: #1E3A8A; border-left: 4px solid #3B82F6; }}
-  .user-msg {{ background: #334155; border-left: 4px solid #64748B; }}
-  .msg-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }}
-  .timestamp {{ color: #94A3B8; font-size: 11px; margin-left: auto; }}
-  .badge {{ font-size: 10px; font-weight: bold; padding: 2px 6px; border-radius: 4px; }}
-  .staff {{ background: #2563EB; color: #FFF; }}
-  .user {{ background: #475569; color: #FFF; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f9f9fc; color: #1f1d2b; margin: 0; padding: 32px 16px; }}
+  .container {{ max-width: 800px; margin: 0 auto; background: #fff; border-radius: 14px; border: 1px solid #e6e4ee; overflow: hidden; }}
+  .header {{ padding: 24px; border-bottom: 1px solid #e6e4ee; }}
+  .header h2 {{ margin: 0; font-size: 20px; letter-spacing: -0.01em; }}
+  .number {{ color: #6b46d8; font-family: ui-monospace, monospace; font-size: 13px; }}
+  .meta-grid {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; margin-top: 16px; font-size: 13px; color: #6b6880; }}
+  .meta-grid strong {{ color: #1f1d2b; font-weight: 500; }}
+  .description {{ padding: 20px 24px; border-bottom: 1px solid #e6e4ee; font-size: 14px; line-height: 1.6; }}
+  .messages {{ padding: 24px; display: flex; flex-direction: column; gap: 12px; }}
+  .message {{ padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.5; border: 1px solid #e6e4ee; max-width: 85%; }}
+  .staff-msg {{ background: #f1edfc; border-color: #d9cff7; align-self: flex-end; }}
+  .user-msg {{ background: #fff; align-self: flex-start; }}
+  .msg-header {{ display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 12px; }}
+  .timestamp {{ color: #6b6880; font-size: 11px; margin-left: auto; }}
+  .badge {{ font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px; }}
+  .staff {{ background: #6b46d8; color: #fff; }}
+  .user {{ background: #eeedf3; color: #6b6880; }}
 </style>
 </head>
 <body>
 <div class="container">
   <div class="header">
-    <h2 style="margin: 0; color: #38BDF8;">Ticket #{ticket.ticket_number}: {escaped_subject}</h2>
+    <div class="number">Ticket #{ticket.ticket_number}</div>
+    <h2>{escaped_subject}</h2>
     <div class="meta-grid">
-      <div><strong>Customer:</strong> {escaped_customer} ({ticket.customer_id})</div>
-      <div><strong>Category:</strong> {escaped_category}</div>
-      <div><strong>Assigned Agent:</strong> {escaped_agent}</div>
-      <div><strong>Status:</strong> {ticket.status} | <strong>Priority:</strong> {ticket.priority}</div>
+      <div>Customer: <strong>{escaped_customer}</strong> ({html.escape(ticket.customer_id)})</div>
+      <div>Category: <strong>{escaped_category}</strong></div>
+      <div>Agent: <strong>{escaped_agent}</strong></div>
+      <div>Status: <strong>{html.escape(ticket.status)}</strong> · Priority: <strong>{html.escape(ticket.priority)}</strong></div>
     </div>
   </div>
   <div class="description">
