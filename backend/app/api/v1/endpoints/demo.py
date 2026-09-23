@@ -1,126 +1,130 @@
-import datetime
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+"""Demo data for the Acme Cloud support server.
 
+Seeding is idempotent: the first call creates the server, canned responses and a
+week of tickets; later calls change nothing. (Seeding twice used to insert the
+same ticket numbers again and fail on the unique (guild, number) index.)
+"""
+
+import datetime
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models import CannedResponse, GuildConfig, InternalNote, Ticket, TicketMessage
 from app.db.session import get_db
-from app.db.models import GuildConfig, Ticket, TicketMessage, InternalNote, CannedResponse
 from app.services.transcript import generate_html_transcript
 
 router = APIRouter()
 
 DEMO_GUILD_ID = "support-demo-999"
+AGENTS = {"agent_1": "Alex Morgan", "agent_2": "Elena Park", "agent_3": "Sam Okafor"}
+
+CANNED = [
+    ("Greeting", "Hi! Thanks for reaching out to Acme Cloud support — an agent is looking at your ticket now.", "General"),
+    ("Order verification", "Could you confirm your order number and the email address used at checkout?", "Billing"),
+    ("Log collection", "Please export the debug log from Settings → Diagnostics and attach it here so we can look at the stack trace.", "Technical"),
+]
+
+# number, customer id, customer, category, subject, description, status, priority, agent,
+# opened (minutes ago), first response (min after open), resolved (min after open), rating, comment, conversation, note
+TICKETS = [
+    (1001, "c_311", "Sarah_Dev", "Technical Issue", "API gateway returns 502 on /v1/auth",
+     "Our staging cluster started returning 502 Bad Gateway on /v1/auth this morning. Production looks fine.",
+     "In Progress", "Urgent", "agent_1", 125, 14, None, None, None,
+     [("staff", "I've taken this and I'm checking the upstream timeouts on your staging cluster now."),
+      ("customer", "Thanks — it's intermittent, roughly one in five requests."),
+      ("staff", "Found it: the keep-alive timeout on the proxy is shorter than the auth service's. Rolling a fix to staging.")],
+     "Proxy keepalive 5s vs auth service 30s on cluster B. Same config exists in eu-west — check before closing."),
+    (1002, "c_207", "Marcus_Corp", "Billing", "Invoice charges 20% VAT for an EU business",
+     "The September invoice has 20% VAT, but we're an EU company with a VAT ID — it should be reverse charge.",
+     "Waiting for Customer", "Normal", "agent_2", 300, 11, None, None, None,
+     [("staff", "Sorry about that. Could you send the VAT ID so I can reissue the invoice with reverse charge?")],
+     "Customer's VAT ID wasn't validated at signup — VIES was down that day."),
+    (1003, "c_118", "Elena_K", "Account Help", "Add a hardware security key to the root account",
+     "I'd like to link a YubiKey to our organisation's root account. Is that supported?",
+     "Resolved", "Low", "agent_1", 1440, 9, 240, 5, "Quick and clear, thanks!",
+     [("staff", "Yes — Settings → Security → Add security key. You'll need to confirm with your current 2FA first."),
+      ("customer", "Done, it works. Thank you!")], None),
+    (1004, "c_402", "DevOps_Dan", "Purchase Question", "Volume pricing for 50+ seats",
+     "Do you offer discounts for annual plans above 50 developer seats?",
+     "Open", "Normal", None, 25, None, None, None, None, [], None),
+    (1005, "c_415", "pixel_nora", "Technical Issue", "Webhooks stopped arriving after domain change",
+     "We moved our app to a new domain yesterday and no webhooks have arrived since.",
+     "Waiting for Staff", "High", "agent_3", 95, 18, None, None, None,
+     [("staff", "Did you update the endpoint URL under Settings → Webhooks, or only the DNS?"),
+      ("customer", "Both, and the test delivery says 'certificate verify failed'.")],
+     "Their new certificate is missing the intermediate chain — ask them to reissue with the full chain."),
+    (1006, "c_133", "jonas.b", "Billing", "Charged twice for the September renewal",
+     "My card shows two charges of $49 on 1 September.",
+     "Resolved", "High", "agent_2", 4320, 6, 95, 4, "Refund arrived next day.",
+     [("staff", "I can see a duplicate authorisation. I've refunded the second charge — it takes 3–5 working days."),
+      ("customer", "Thanks, I'll keep an eye out.")], None),
+    (1007, "c_501", "mira_builds", "Account Help", "Can't sign in after changing my email",
+     "I changed my login email and now the password reset link never arrives.",
+     "Open", "High", None, 8, None, None, None, None, [], None),
+    (1008, "c_288", "TheoGrant", "Other", "Feature request: CSV export of audit logs",
+     "Our compliance team needs the audit log as CSV every month.",
+     "Closed", "Low", "agent_3", 7200, 42, 180, 5, None,
+     [("staff", "Good news — CSV export shipped last week. It's under Audit log → Export.")], None),
+    (1009, "c_377", "kai.ops", "Technical Issue", "Deploys stuck at 'Building' for 20 minutes",
+     "Every deploy since 10:00 hangs at the build step. No logs are shown.",
+     "Resolved", "Urgent", "agent_1", 2880, 4, 55, 5, "Great response time.",
+     [("staff", "We had a stuck build runner in us-east. It's been replaced — could you retry?"),
+      ("customer", "Retried, it went through in 2 minutes. Thanks!")], None),
+    (1010, "c_244", "lena.writes", "Purchase Question", "Do you offer non-profit pricing?",
+     "We're a registered charity — is there a discount?",
+     "Waiting for Customer", "Low", "agent_2", 1500, 35, None, None, None,
+     [("staff", "We do: 50% off Team plans. Could you send your charity registration number?")], None),
+]
+
 
 @router.post("/seed")
 async def seed_demo_support_data(db: AsyncSession = Depends(get_db)):
-    # 1. Guild config
-    stmt_g = select(GuildConfig).where(GuildConfig.guild_id == DEMO_GUILD_ID)
-    res_g = await db.execute(stmt_g)
-    if not res_g.scalar_one_or_none():
-        db.add(GuildConfig(
-            guild_id=DEMO_GUILD_ID,
-            guild_name="Acme Cloud Technologies",
-            support_channel_id="channel-support-hub",
-            staff_role_id="role-support-staff",
-            is_enabled=True
-        ))
+    existing = await db.execute(select(GuildConfig).where(GuildConfig.guild_id == DEMO_GUILD_ID))
+    if existing.scalar_one_or_none() is not None:
+        return {"message": "Demo data is already loaded.", "created": False}
 
-    # 2. Canned responses
-    canned_samples = [
-        ("Greeting", "Hello! Thank you for reaching out to Acme Cloud Support. An agent is reviewing your inquiry.", "General"),
-        ("Order Verification", "Could you please confirm your order number and the email address used during purchase?", "Billing"),
-        ("Log Collection", "Please export your server debug log and upload it here so we can analyze the error stack trace.", "Technical")
-    ]
-    for title, text, cat in canned_samples:
-        db.add(CannedResponse(guild_id=DEMO_GUILD_ID, title=title, content=text, category=cat, usage_count=5))
+    db.add(GuildConfig(guild_id=DEMO_GUILD_ID, guild_name="Acme Cloud", support_channel_id="channel-support-hub",
+                       staff_role_id="role-support-staff", is_enabled=True))
+    for title, text, category in CANNED:
+        db.add(CannedResponse(guild_id=DEMO_GUILD_ID, title=title, content=text, category=category, usage_count=5))
 
-    # 3. Tickets
     now = datetime.datetime.utcnow()
-    demo_tickets = [
-        (
-            1001, "c_1", "Sarah_Dev", "Technical Issue", "API Gateway 502 Bad Gateway",
-            "Our staging cluster started throwing 502 errors when hitting /v1/auth since this morning.",
-            "In Progress", "Urgent", "agent_1", "Alex (Lead Engineer)",
-            now - datetime.timedelta(hours=2), now - datetime.timedelta(hours=1, minutes=45), None, None, None
-        ),
-        (
-            1002, "c_2", "Marcus_Corp", "Billing", "Invoice VAT mismatch on Pro Tier",
-            "The invoice issued for September reflects a 20% VAT rate instead of the reverse charge applicable to our EU entity.",
-            "Waiting for Customer", "Normal", "agent_2", "Elena (Billing Ops)",
-            now - datetime.timedelta(hours=5), now - datetime.timedelta(hours=4, minutes=50), None, None, None
-        ),
-        (
-            1003, "c_3", "Elena_K", "Account Help", "Enable 2FA Hardware Security Key",
-            "I would like to link a YubiKey to our organizational root account.",
-            "Resolved", "Low", "agent_1", "Alex (Lead Engineer)",
-            now - datetime.timedelta(days=1), now - datetime.timedelta(hours=23), now - datetime.timedelta(hours=20), 5, "Super quick resolution, thanks!"
-        ),
-        (
-            1004, "c_4", "DevOps_Dan", "Purchase Question", "Volume licensing inquiry for 50+ seats",
-            "Do you offer tiered discounts for annual commitments above 50 enterprise developers?",
-            "Open", "Normal", None, None,
-            now - datetime.timedelta(minutes=25), None, None, None, None
-        ),
-    ]
-
-    for num, cid, cname, cat, subj, desc, status, priority, aid, aname, cr_at, fr_at, res_at, rating, r_comment in demo_tickets:
+    for (number, customer_id, customer, category, subject, description, status, priority, agent_id,
+         opened_ago, first_after, resolved_after, rating, comment, conversation, note) in TICKETS:
+        opened = now - datetime.timedelta(minutes=opened_ago)
+        first = opened + datetime.timedelta(minutes=first_after) if first_after is not None else None
+        resolved = opened + datetime.timedelta(minutes=resolved_after) if resolved_after is not None else None
+        agent_name = AGENTS.get(agent_id) if agent_id else None
         ticket = Ticket(
-            ticket_number=num,
-            guild_id=DEMO_GUILD_ID,
-            customer_id=cid,
-            customer_name=cname,
-            category=cat,
-            subject=subj,
-            description=desc,
-            status=status,
-            priority=priority,
-            assigned_agent_id=aid,
-            assigned_agent_name=aname,
-            created_at=cr_at,
-            first_response_at=fr_at,
-            resolved_at=res_at,
-            rating=rating,
-            rating_comment=r_comment
+            ticket_number=number, guild_id=DEMO_GUILD_ID, customer_id=customer_id, customer_name=customer,
+            category=category, subject=subject, description=description, status=status, priority=priority,
+            assigned_agent_id=agent_id, assigned_agent_name=agent_name, created_at=opened,
+            first_response_at=first, resolved_at=resolved,
+            closed_at=resolved + datetime.timedelta(hours=1) if resolved and status == "Closed" else None,
+            rating=rating, rating_comment=comment,
         )
         db.add(ticket)
-        await db.commit()
-        await db.refresh(ticket)
+        await db.flush()
 
-        # Messages
-        db.add(TicketMessage(
-            ticket_id=ticket.id,
-            author_id=cid,
-            author_name=cname,
-            is_staff=False,
-            content=desc,
-            timestamp=cr_at
-        ))
-        if fr_at and aid and aname:
-            db.add(TicketMessage(
-                ticket_id=ticket.id,
-                author_id=aid,
-                author_name=aname,
-                is_staff=True,
-                content="Hello! I've taken ownership of your ticket and am actively looking into this now.",
-                timestamp=fr_at
-            ))
-
-        if status == "Resolved":
-            ticket.transcript_html = generate_html_transcript(ticket, [
-                TicketMessage(author_name=cname, content=desc, is_staff=False, timestamp=cr_at),
-                TicketMessage(author_name=aname, content="Issue resolved!", is_staff=True, timestamp=res_at)
-            ])
-            await db.commit()
-
-        # Add private staff note on ticket 1001
-        if num == 1001:
-            db.add(InternalNote(
-                ticket_id=ticket.id,
-                staff_id="agent_1",
-                staff_name="Alex (Lead Engineer)",
-                note_text="Investigating Nginx upstream proxy keepalive timeout configs on cluster B.",
-                created_at=now - datetime.timedelta(hours=1)
-            ))
+        messages = [TicketMessage(ticket_id=ticket.id, author_id=customer_id, author_name=customer, is_staff=False,
+                                  content=description, timestamp=opened)]
+        # Spread the replies between the first response and now (or the resolution).
+        end = resolved or now
+        start = first or opened
+        for index, (who, text) in enumerate(conversation):
+            at = start + (end - start) * (index / max(1, len(conversation)))
+            staff = who == "staff"
+            messages.append(TicketMessage(ticket_id=ticket.id, author_id=agent_id if staff else customer_id,
+                                          author_name=agent_name if staff else customer, is_staff=staff,
+                                          content=text, timestamp=at))
+        db.add_all(messages)
+        if note and agent_id:
+            db.add(InternalNote(ticket_id=ticket.id, staff_id=agent_id, staff_name=agent_name, note_text=note,
+                                created_at=start + datetime.timedelta(minutes=2)))
+        if status in ("Resolved", "Closed"):
+            ticket.transcript_html = generate_html_transcript(ticket, messages)
 
     await db.commit()
-    return {"message": "SupportDesk demo seeded successfully for support-demo-999"}
+    return {"message": f"Loaded {len(TICKETS)} demo tickets for Acme Cloud.", "created": True}
