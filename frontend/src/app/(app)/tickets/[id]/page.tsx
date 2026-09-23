@@ -1,372 +1,219 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useState } from "react";
 import Link from "next/link";
-import { 
-  ArrowLeft, Lock, MessageSquare, Send, Shield, User, Clock, 
-  FileText, CheckCircle2, AlertTriangle, UserCheck, Star 
-} from "lucide-react";
-import { api, TicketDetail } from "@/lib/api";
-import TicketStatusBadge from "@/components/TicketStatusBadge";
-import PriorityBadge from "@/components/PriorityBadge";
+import { useParams } from "next/navigation";
+import { toast } from "sonner";
+import { FileDown, FileText, Lock, MessageSquare, Send, Star, UserCheck } from "lucide-react";
+import { PriorityPill, StatusPill } from "@/components/desk";
+import { SelectField } from "@/components/kit/select-field";
+import { Empty, ErrorState, Field, PageLoading, PageTitle, Panel, Tag } from "@/components/kit/ui";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { useApi } from "@/hooks/use-api";
+import { api, type Ticket, type TicketDetail, transcriptUrl } from "@/lib/api";
+import { duration, formatDateTime, formatTime, parseUTC, PRIORITIES, relative, STATUSES } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
-export default function TicketDetailPage() {
-  const params = useParams();
-  const router = useRouter();
-  const ticketId = Number(params?.id);
+const AGENT = "Alex Morgan";
 
-  const [ticket, setTicket] = useState<TicketDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"chat" | "notes">("chat");
+function minutesBetween(from: string, to: string | null): number | null {
+  return to ? (parseUTC(to).getTime() - parseUTC(from).getTime()) / 60000 : null;
+}
 
-  const [replyText, setReplyText] = useState("");
-  const [noteText, setNoteText] = useState("");
+export default function TicketPage() {
+  const id = Number(useParams<{ id: string }>().id);
+  const ticket = useApi(() => api.getTicketDetail(id), String(id));
+
+  if (ticket.error) return <ErrorState message={ticket.error} onRetry={ticket.reload} />;
+  if (!ticket.data) return <PageLoading />;
+  return <TicketView ticket={ticket.data} reload={ticket.reload} />;
+}
+
+function TicketView({ ticket: t, reload }: { ticket: TicketDetail; reload: () => void }) {
+  const [busy, setBusy] = useState(false);
+
+  async function act(action: () => Promise<unknown>, success: string) {
+    setBusy(true);
+    try {
+      await action();
+      toast.success(success);
+      reload();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const firstResponse = minutesBetween(t.created_at, t.first_response_at);
+  const resolution = minutesBetween(t.created_at, t.resolved_at);
+
+  return (
+    <>
+      <PageTitle
+        eyebrow={<><Link href="/dashboard" className="hover:text-foreground">Ticket queue</Link> / <span className="font-mono">#{t.ticket_number}</span></>}
+        title={t.subject}
+        description={<span className="flex flex-wrap items-center gap-2"><StatusPill status={t.status} /><PriorityPill priority={t.priority} /><Tag>{t.category}</Tag><span>opened {relative(t.created_at)} by {t.customer_name}</span></span>}
+        actions={<>
+          {!t.assigned_agent_id ? <Button onClick={() => act(() => api.claimTicket(t.id, AGENT), "Ticket claimed")} disabled={busy}><UserCheck />Claim ticket</Button> : null}
+          <Button asChild variant="outline"><a href={transcriptUrl(t.id, "html")} target="_blank" rel="noreferrer"><FileText />Transcript</a></Button>
+          <Button asChild variant="outline" size="icon" aria-label="Download text transcript"><a href={transcriptUrl(t.id, "text")}><FileDown /></a></Button>
+        </>} />
+
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="min-w-0 space-y-5">
+          <Panel title="Initial request" description={`${t.customer_name} · ${formatDateTime(t.created_at)}`} bodyClassName="px-5 py-4">
+            <p className="text-sm leading-relaxed whitespace-pre-line">{t.description}</p>
+          </Panel>
+
+          <Tabs defaultValue="conversation">
+            <TabsList>
+              <TabsTrigger value="conversation"><MessageSquare />Conversation ({t.messages.length})</TabsTrigger>
+              <TabsTrigger value="notes"><Lock />Internal notes ({t.notes.length})</TabsTrigger>
+            </TabsList>
+            <TabsContent value="conversation" className="mt-3">
+              <Conversation ticket={t} onSent={reload} />
+            </TabsContent>
+            <TabsContent value="notes" className="mt-3">
+              <Notes ticket={t} onAdded={reload} />
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        <div className="space-y-5">
+          <Panel title="Properties" bodyClassName="space-y-4 px-5 py-4">
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Status</p>
+              <SelectField label="Status" value={t.status} onChange={(v) => act(() => api.updateStatus(t.id, v as Ticket["status"]), `Status set to ${v}`)} options={STATUSES} />
+            </div>
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Priority</p>
+              <SelectField label="Priority" value={t.priority} onChange={(v) => act(() => api.updatePriority(t.id, v as Ticket["priority"]), `Priority set to ${v}`)} options={PRIORITIES} />
+            </div>
+            <div>
+              <Field label="Customer">{t.customer_name}</Field>
+              <Field label="Discord ID"><span className="font-mono text-xs">{t.customer_id}</span></Field>
+              <Field label="Assignee">{t.assigned_agent_name ?? <span className="text-muted-foreground">Unassigned</span>}</Field>
+              <Field label="Opened">{formatDateTime(t.created_at)}</Field>
+            </div>
+          </Panel>
+
+          <Panel title="Service levels" description="Measured from the ticket's own timestamps." bodyClassName="px-5 py-2">
+            <Field label="First response">{firstResponse === null ? <span className="text-muted-foreground">Waiting</span> : duration(firstResponse)}</Field>
+            <Field label="Resolution">{resolution === null ? <span className="text-muted-foreground">Not resolved</span> : duration(resolution)}</Field>
+            <Field label="Closed">{t.closed_at ? formatDateTime(t.closed_at) : "—"}</Field>
+          </Panel>
+
+          {t.rating ? (
+            <Panel title="Customer rating" bodyClassName="px-5 py-4">
+              <div className="flex items-center gap-0.5" aria-label={`${t.rating} out of 5`}>
+                {[1, 2, 3, 4, 5].map((n) => <Star key={n} className={cn("size-4", n <= t.rating! ? "fill-warn text-warn" : "text-border")} />)}
+                <span className="ml-2 text-sm font-medium">{t.rating} / 5</span>
+              </div>
+              {t.rating_comment ? <p className="mt-2 text-sm text-muted-foreground">“{t.rating_comment}”</p> : null}
+            </Panel>
+          ) : null}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function Conversation({ ticket: t, onSent }: { ticket: TicketDetail; onSent: () => void }) {
+  const [text, setText] = useState("");
+  const [asCustomer, setAsCustomer] = useState(false);
   const [sending, setSending] = useState(false);
+  const closed = t.status === "Closed";
 
-  useEffect(() => {
-    if (!ticketId) return;
-    loadTicket();
-  }, [ticketId]);
-
-  async function loadTicket() {
-    setLoading(true);
-    try {
-      const data = await api.getTicketDetail("support-demo-999", ticketId);
-      setTicket(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleSendReply(e: React.FormEvent) {
+  async function send(e: React.FormEvent) {
     e.preventDefault();
-    if (!replyText.trim()) return;
+    if (!text.trim()) return;
     setSending(true);
     try {
-      await api.addMessage("support-demo-999", ticketId, replyText.trim(), true);
-      setReplyText("");
-      await loadTicket();
+      await api.addMessage(t.id, text.trim(), asCustomer ? { id: t.customer_id, name: t.customer_name, staff: false } : { id: "agent_1", name: AGENT, staff: true });
+      setText("");
+      onSent();
     } catch (err) {
-      alert("Failed to send reply.");
+      toast.error((err as Error).message);
     } finally {
       setSending(false);
     }
-  }
-
-  async function handleAddNote(e: React.FormEvent) {
-    e.preventDefault();
-    if (!noteText.trim()) return;
-    setSending(true);
-    try {
-      await api.addNote("support-demo-999", ticketId, noteText.trim());
-      setNoteText("");
-      await loadTicket();
-    } catch (err) {
-      alert("Failed to add private note.");
-    } finally {
-      setSending(false);
-    }
-  }
-
-  async function handleClaim() {
-    try {
-      await api.claimTicket("support-demo-999", ticketId, "Alex (Lead Engineer)");
-      await loadTicket();
-    } catch (err) {
-      alert("Failed to claim ticket.");
-    }
-  }
-
-  async function handleStatusChange(newStatus: string) {
-    try {
-      await api.updateStatus("support-demo-999", ticketId, newStatus);
-      await loadTicket();
-    } catch (err) {
-      alert("Failed to update status.");
-    }
-  }
-
-  async function handlePriorityChange(newPriority: string) {
-    try {
-      await api.updatePriority("support-demo-999", ticketId, newPriority);
-      await loadTicket();
-    } catch (err) {
-      alert("Failed to update priority.");
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="py-24 text-center space-y-3">
-        <div className="w-10 h-10 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="text-xs text-zinc-400 font-mono">Loading ticket workspace...</p>
-      </div>
-    );
-  }
-
-  if (!ticket) {
-    return (
-      <div className="py-20 text-center space-y-4">
-        <h2 className="text-xl font-bold text-white">Ticket not found</h2>
-        <Link href="/dashboard" className="text-xs text-blue-400 hover:underline">
-          Return to Queue
-        </Link>
-      </div>
-    );
   }
 
   return (
-    <div className="space-y-6 py-4">
-      {/* Back button & Title Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/80 pb-4">
-        <div className="space-y-1">
-          <Link
-            href="/dashboard"
-            className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition pb-1"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            Back to Queue
-          </Link>
-          <div className="flex items-center gap-3">
-            <span className="text-xl font-mono font-bold text-blue-400">#{ticket.ticket_number}</span>
-            <h1 className="text-xl font-bold text-white">{ticket.subject}</h1>
-            <TicketStatusBadge status={ticket.status} />
-            <PriorityBadge priority={ticket.priority} />
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {!ticket.assigned_agent_id && (
-            <button
-              onClick={handleClaim}
-              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs flex items-center gap-1.5 transition"
-            >
-              <UserCheck className="w-3.5 h-3.5" />
-              Claim Ticket
-            </button>
-          )}
-
-          <a
-            href={`http://localhost:8000/api/v1/tickets/support-demo-999/${ticket.id}/transcript?format=html`}
-            target="_blank"
-            rel="noreferrer"
-            className="px-3 py-1.5 rounded-lg border border-zinc-800 hover:border-zinc-700 bg-zinc-900 text-xs text-zinc-300 flex items-center gap-1.5 transition"
-          >
-            <FileText className="w-3.5 h-3.5" />
-            HTML Transcript
-          </a>
-        </div>
-      </div>
-
-      {/* Main Grid: Conversation + Sidebar */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Left Column: Timeline, Messages & Notes */}
-        <div className="lg:col-span-8 space-y-4">
-          {/* Initial Customer Request Card */}
-          <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-900/60 space-y-2">
-            <div className="flex items-center justify-between text-xs text-zinc-400">
-              <span className="font-semibold text-white">Initial Request</span>
-              <span className="font-mono text-[11px]">{ticket.created_at.substring(0, 16).replace("T", " ")} UTC</span>
+    <Panel bodyClassName="p-0">
+      <ol className="space-y-3 p-4 sm:p-5">
+        {t.messages.map((m) => (
+          <li key={m.id} className={cn("flex", m.is_staff ? "justify-end" : "justify-start")}>
+            <div className={cn("max-w-[85%] rounded-xl border px-3.5 py-2.5", m.is_staff ? "border-primary/20 bg-accent" : "bg-card")}>
+              <div className="mb-1 flex items-center gap-2 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">{m.author_name}</span>
+                {m.is_staff ? <span className="rounded bg-primary px-1 py-px text-[10px] font-semibold text-primary-foreground">STAFF</span> : null}
+                <time dateTime={m.timestamp} title={formatDateTime(m.timestamp)}>{formatTime(m.timestamp)}</time>
+              </div>
+              <p className="text-sm leading-relaxed whitespace-pre-line">{m.content}</p>
             </div>
-            <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-line">{ticket.description}</p>
+          </li>
+        ))}
+      </ol>
+      {closed ? (
+        <p className="border-t px-5 py-3 text-sm text-muted-foreground">This ticket is closed. Reopen it to reply.</p>
+      ) : (
+        <form onSubmit={send} className="space-y-2 border-t p-4 sm:p-5">
+          <Textarea rows={3} value={text} onChange={(e) => setText(e.target.value)} placeholder={asCustomer ? `Reply as ${t.customer_name}…` : "Write a reply to the customer…"} aria-label="Reply" />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="flex items-center gap-2 text-xs text-muted-foreground">
+              <input type="checkbox" checked={asCustomer} onChange={(e) => setAsCustomer(e.target.checked)} className="accent-[var(--primary)]" />
+              Simulate a customer reply (demo)
+            </label>
+            <Button type="submit" disabled={sending || !text.trim()}><Send />{sending ? "Sending…" : "Send reply"}</Button>
           </div>
+        </form>
+      )}
+    </Panel>
+  );
+}
 
-          {/* Tab Selector: Conversation vs Staff Notes */}
-          <div className="flex border-b border-zinc-800 text-xs font-medium">
-            <button
-              onClick={() => setActiveTab("chat")}
-              className={`py-2 px-4 border-b-2 flex items-center gap-1.5 transition ${
-                activeTab === "chat"
-                  ? "border-blue-500 text-blue-400"
-                  : "border-transparent text-zinc-400 hover:text-white"
-              }`}
-            >
-              <MessageSquare className="w-3.5 h-3.5" />
-              Conversation ({ticket.messages.length})
-            </button>
-            <button
-              onClick={() => setActiveTab("notes")}
-              className={`py-2 px-4 border-b-2 flex items-center gap-1.5 transition ${
-                activeTab === "notes"
-                  ? "border-amber-500 text-amber-400"
-                  : "border-transparent text-zinc-400 hover:text-white"
-              }`}
-            >
-              <Lock className="w-3.5 h-3.5" />
-              Internal Notes ({ticket.notes.length})
-            </button>
-          </div>
+function Notes({ ticket: t, onAdded }: { ticket: TicketDetail; onAdded: () => void }) {
+  const [text, setText] = useState("");
+  const [saving, setSaving] = useState(false);
 
-          {activeTab === "chat" ? (
-            <div className="space-y-4">
-              <div className="space-y-3 min-h-[220px]">
-                {ticket.messages.map((m) => (
-                  <div
-                    key={m.id}
-                    className={`p-3.5 rounded-xl border text-xs space-y-1.5 ${
-                      m.is_staff
-                        ? "bg-blue-950/20 border-blue-900/50 ml-6"
-                        : "bg-zinc-900/60 border-zinc-800/80 mr-6"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between text-zinc-400 font-mono text-[11px]">
-                      <span className="font-bold text-white flex items-center gap-1.5">
-                        {m.author_name}
-                        {m.is_staff && (
-                          <span className="px-1.5 py-0.2 rounded bg-blue-600 text-[10px] text-white font-sans">
-                            STAFF
-                          </span>
-                        )}
-                      </span>
-                      <span>{m.timestamp.substring(11, 16)}</span>
-                    </div>
-                    <p className="text-zinc-200 leading-relaxed whitespace-pre-line">{m.content}</p>
-                  </div>
-                ))}
-              </div>
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    if (!text.trim()) return;
+    setSaving(true);
+    try {
+      await api.addNote(t.id, text.trim());
+      setText("");
+      onAdded();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
-              {/* Staff Reply Form */}
-              <form onSubmit={handleSendReply} className="space-y-2 pt-2">
-                <textarea
-                  rows={3}
-                  value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
-                  placeholder="Type official support reply to customer..."
-                  required
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
-                />
-                <button
-                  type="submit"
-                  disabled={sending}
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 transition ml-auto"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  {sending ? "Sending..." : "Send Response"}
-                </button>
-              </form>
-            </div>
-          ) : (
-            /* Internal Notes Tab */
-            <div className="space-y-4">
-              <div className="p-3 rounded-lg border border-amber-500/20 bg-amber-500/5 text-amber-300 text-xs flex items-center gap-2">
-                <Lock className="w-4 h-4 shrink-0" />
-                <span>Internal staff notes are never displayed to the customer or posted in Discord channels.</span>
-              </div>
-
-              <div className="space-y-3 min-h-[160px]">
-                {ticket.notes.length === 0 ? (
-                  <p className="text-xs text-zinc-500 font-mono italic py-4">No internal notes recorded yet.</p>
-                ) : (
-                  ticket.notes.map((n) => (
-                    <div key={n.id} className="p-3 rounded-xl border border-zinc-800 bg-zinc-900/60 text-xs space-y-1">
-                      <div className="flex justify-between text-zinc-400 font-mono text-[11px]">
-                        <span className="font-semibold text-amber-400">{n.staff_name}</span>
-                        <span>{n.created_at.substring(0, 16).replace("T", " ")}</span>
-                      </div>
-                      <p className="text-zinc-300">{n.note_text}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Add Note Form */}
-              <form onSubmit={handleAddNote} className="space-y-2 pt-2">
-                <textarea
-                  rows={2}
-                  value={noteText}
-                  onChange={(e) => setNoteText(e.target.value)}
-                  placeholder="Record confidential troubleshooting notes, user verification details..."
-                  required
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-amber-500"
-                />
-                <button
-                  type="submit"
-                  disabled={sending}
-                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold flex items-center gap-1.5 transition ml-auto"
-                >
-                  <Lock className="w-3.5 h-3.5" />
-                  Add Internal Note
-                </button>
-              </form>
-            </div>
-          )}
-        </div>
-
-        {/* Right Column: Ticket Metadata, SLA & Actions */}
-        <div className="lg:col-span-4 space-y-4">
-          <div className="p-5 rounded-2xl border border-zinc-800 bg-zinc-900/40 space-y-4">
-            <h3 className="font-semibold text-sm text-white border-b border-zinc-800/80 pb-2">Ticket Properties</h3>
-
-            <div className="space-y-3 text-xs">
-              <div className="space-y-1">
-                <label className="text-[11px] font-mono text-zinc-400 uppercase">Status Transition</label>
-                <select
-                  value={ticket.status}
-                  onChange={(e) => handleStatusChange(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                >
-                  <option value="Open">Open</option>
-                  <option value="Waiting for Staff">Waiting for Staff</option>
-                  <option value="Waiting for Customer">Waiting for Customer</option>
-                  <option value="In Progress">In Progress</option>
-                  <option value="Resolved">Resolved</option>
-                  <option value="Closed">Closed</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-[11px] font-mono text-zinc-400 uppercase">Priority Rating</label>
-                <select
-                  value={ticket.priority}
-                  onChange={(e) => handlePriorityChange(e.target.value)}
-                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-blue-500"
-                >
-                  <option value="Low">Low</option>
-                  <option value="Normal">Normal</option>
-                  <option value="High">High</option>
-                  <option value="Urgent">Urgent</option>
-                </select>
-              </div>
-
-              <div className="pt-2 border-t border-zinc-800/60 space-y-2 text-zinc-400">
-                <div className="flex justify-between">
-                  <span>Customer:</span>
-                  <strong className="text-white">{ticket.customer_name}</strong>
-                </div>
-                <div className="flex justify-between">
-                  <span>Discord ID:</span>
-                  <span className="font-mono text-zinc-400">{ticket.customer_id}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Category:</span>
-                  <span className="text-white">{ticket.category}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Assigned Agent:</span>
-                  <span className="text-blue-400 font-medium">
-                    {ticket.assigned_agent_name || "Unassigned"}
-                  </span>
-                </div>
-              </div>
-
-              {ticket.rating && (
-                <div className="p-3 rounded-lg border border-amber-500/20 bg-amber-500/10 space-y-1">
-                  <div className="flex items-center gap-1 text-amber-400 font-bold">
-                    <Star className="w-3.5 h-3.5 fill-amber-400" />
-                    <span>Customer Rating: {ticket.rating} / 5</span>
-                  </div>
-                  {ticket.rating_comment && (
-                    <p className="text-[11px] text-zinc-300 italic">&ldquo;{ticket.rating_comment}&rdquo;</p>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+  return (
+    <Panel bodyClassName="p-0">
+      <p className="flex items-center gap-2 border-b bg-warn/10 px-5 py-2.5 text-xs text-foreground/80"><Lock className="size-3.5 text-warn" />Internal notes are only visible here. They are never posted to the customer&apos;s Discord channel.</p>
+      {t.notes.length === 0 ? (
+        <Empty title="No internal notes yet" description="Use notes for verification details, escalation context or hand-over." />
+      ) : (
+        <ol className="divide-y">
+          {t.notes.map((n) => (
+            <li key={n.id} className="px-5 py-3">
+              <div className="flex justify-between text-xs text-muted-foreground"><span className="font-medium text-foreground">{n.staff_name}</span><span>{formatDateTime(n.created_at)}</span></div>
+              <p className="mt-1 text-sm">{n.note_text}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+      <form onSubmit={add} className="space-y-2 border-t p-4 sm:p-5">
+        <Textarea rows={2} value={text} onChange={(e) => setText(e.target.value)} placeholder="Add a private note for the team…" aria-label="Internal note" />
+        <div className="flex justify-end"><Button type="submit" variant="outline" disabled={saving || !text.trim()}><Lock />Add note</Button></div>
+      </form>
+    </Panel>
   );
 }

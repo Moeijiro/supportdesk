@@ -1,107 +1,44 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Link from "next/link";
-import { BarChart3, Clock, ArrowLeft, CheckCircle2, AlertCircle, Headphones } from "lucide-react";
-import { api, OverviewStats, CategoryBreakdown } from "@/lib/api";
+import { CheckCircle2, Clock, Hourglass, Inbox } from "lucide-react";
+import { Bar, Empty, ErrorState, PageLoading, PageTitle, Panel, Stat } from "@/components/kit/ui";
+import { useApi } from "@/hooks/use-api";
+import { api, DEMO_GUILD_NAME } from "@/lib/api";
+import { duration } from "@/lib/format";
 
 export default function AnalyticsPage() {
-  const [stats, setStats] = useState<OverviewStats | null>(null);
-  const [categories, setCategories] = useState<CategoryBreakdown[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    loadAnalytics();
-  }, []);
-
-  async function loadAnalytics() {
-    setLoading(true);
-    try {
-      const [st, cats] = await Promise.all([
-        api.getOverview("support-demo-999"),
-        api.getCategories("support-demo-999"),
-      ]);
-      setStats(st);
-      setCategories(cats);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }
+  const data = useApi(() => Promise.all([api.getOverview(), api.getCategories()]), "analytics");
+  if (data.error) return <ErrorState message={data.error} onRetry={data.reload} />;
+  if (!data.data) return <PageLoading />;
+  const [s, categories] = data.data;
+  const sorted = [...categories].sort((a, b) => b.count - a.count);
+  const max = Math.max(1, ...sorted.map((c) => c.count));
 
   return (
-    <div className="space-y-8 py-4">
-      <div className="space-y-1 border-b border-zinc-800/80 pb-4">
-        <Link
-          href="/dashboard"
-          className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition pb-1"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" />
-          Back to Ticket Queue
-        </Link>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <BarChart3 className="w-6 h-6 text-blue-400" />
-          Support SLA & Performance Analytics
-        </h1>
-        <p className="text-xs text-zinc-400">
-          Measured first-response times, resolution durations, and category distribution for <strong className="text-white">Acme Cloud Technologies</strong>.
-        </p>
+    <>
+      <PageTitle title="SLA analytics" description={`Response and resolution times for ${DEMO_GUILD_NAME}, measured from ticket timestamps — nothing is estimated.`} />
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Avg. first response" icon={Clock} value={duration(s.average_first_response_minutes)} hint="Open → first staff reply" />
+        <Stat label="Avg. resolution" icon={Hourglass} value={duration(s.average_resolution_hours * 60)} hint="Open → resolved" />
+        <Stat label="Resolved today" icon={CheckCircle2} value={s.resolved_today_count} tone={s.resolved_today_count ? "ok" : undefined} />
+        <Stat label="Tickets recorded" icon={Inbox} value={s.total_tickets_recorded} hint={`${s.open_tickets_count} still open`} />
       </div>
-
-      {loading ? (
-        <div className="py-24 text-center text-xs text-zinc-400 font-mono">Aggregating telemetry...</div>
-      ) : (
-        <div className="space-y-8">
-          {/* Key Metrics */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Avg First Response</span>
-              <p className="text-2xl font-bold text-blue-400">
-                {stats?.average_first_response_minutes || 0} min
-              </p>
+      <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
+        <Panel title="Tickets by category" description="Share of all recorded tickets.">
+          {sorted.length === 0 ? <Empty title="No tickets yet" description="Load the demo tickets from the queue." /> : (
+            <div className="space-y-4 px-5 py-5">
+              {sorted.map((c) => <Bar key={c.category} label={c.category} value={c.count} max={max} hint={`${c.count} · ${c.percentage}%`} />)}
             </div>
-            <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Avg Resolution Time</span>
-              <p className="text-2xl font-bold text-emerald-400">
-                {stats?.average_resolution_hours || 0} hrs
-              </p>
-            </div>
-            <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Resolved Today</span>
-              <p className="text-2xl font-bold text-white">{stats?.resolved_today_count || 0}</p>
-            </div>
-            <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Lifetime Tickets</span>
-              <p className="text-2xl font-bold text-zinc-300">{stats?.total_tickets_recorded || 0}</p>
-            </div>
+          )}
+        </Panel>
+        <Panel title="Queue health" description="Where open tickets are waiting right now.">
+          <div className="space-y-4 px-5 py-5">
+            <Bar label="Open" value={s.open_tickets_count} max={Math.max(1, s.open_tickets_count)} />
+            <Bar label="Waiting on staff" value={s.waiting_for_staff_count} max={Math.max(1, s.open_tickets_count)} tone="fail" />
+            <Bar label="Unassigned" value={s.unassigned_count} max={Math.max(1, s.open_tickets_count)} tone="warn" />
           </div>
-
-          {/* Category Distribution Breakdown */}
-          <div className="p-6 rounded-2xl border border-zinc-800 bg-zinc-900/40 space-y-4">
-            <h3 className="font-semibold text-sm text-white">Tickets by Category Breakdown</h3>
-
-            <div className="space-y-3">
-              {categories.map((c) => (
-                <div key={c.category} className="space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span className="font-medium text-white">{c.category}</span>
-                    <span className="font-mono text-zinc-400">
-                      {c.count} tickets ({c.percentage}%)
-                    </span>
-                  </div>
-                  <div className="w-full bg-zinc-950 rounded-full h-2 overflow-hidden border border-zinc-800/80">
-                    <div
-                      className="bg-blue-500 h-full rounded-full transition-all"
-                      style={{ width: `${c.percentage}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+        </Panel>
+      </div>
+    </>
   );
 }

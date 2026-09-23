@@ -1,4 +1,6 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+export const API_URL = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1").replace(/\/$/, "");
+export const DEMO_GUILD = "support-demo-999";
+export const DEMO_GUILD_NAME = "Acme Cloud";
 
 export interface Ticket {
   id: number;
@@ -62,111 +64,80 @@ export interface CategoryBreakdown {
   percentage: number;
 }
 
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: init?.body ? { "Content-Type": "application/json", ...init?.headers } : init?.headers,
+    });
+  } catch {
+    throw new ApiError("Can't reach the SupportDesk API. Is the backend running on port 8000?", 0);
+  }
+  if (!res.ok) {
+    let message = `Request failed (HTTP ${res.status}).`;
+    try {
+      const data = await res.json();
+      const detail = data?.detail;
+      if (typeof detail === "string") message = detail;
+      else if (Array.isArray(detail) && detail[0]?.msg) message = String(detail[0].msg);
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(message, res.status);
+  }
+  return res.json() as Promise<T>;
+}
+
+const post = (body: unknown): RequestInit => ({ method: "POST", body: JSON.stringify(body) });
+
+export type TicketFilters = { status?: string; category?: string; priority?: string; search?: string };
+export type NewTicket = { customer_id: string; customer_name: string; category: string; subject: string; description: string; priority: Ticket["priority"] };
+
+export function transcriptUrl(ticketId: number, format: "html" | "text" = "html", guildId = DEMO_GUILD): string {
+  return `${API_URL}/tickets/${guildId}/${ticketId}/transcript?format=${format}`;
+}
+
 export const api = {
-  async getTickets(
-    guildId: string = "support-demo-999",
-    params?: { status?: string; category?: string; priority?: string; search?: string }
-  ): Promise<Ticket[]> {
+  getTickets(filters: TicketFilters = {}, guildId = DEMO_GUILD) {
     const query = new URLSearchParams();
-    if (params?.status) query.set("status", params.status);
-    if (params?.category) query.set("category", params.category);
-    if (params?.priority) query.set("priority", params.priority);
-    if (params?.search) query.set("search", params.search);
-
-    const res = await fetch(`${API_URL}/tickets/${guildId}?${query.toString()}`);
-    if (!res.ok) throw new Error("Failed to load tickets.");
-    return res.json();
+    for (const [key, value] of Object.entries(filters)) if (value && value !== "All") query.set(key, value);
+    return request<Ticket[]>(`/tickets/${guildId}?${query}`);
   },
-
-  async getTicketDetail(guildId: string = "support-demo-999", ticketId: number): Promise<TicketDetail> {
-    const res = await fetch(`${API_URL}/tickets/${guildId}/${ticketId}`);
-    if (!res.ok) throw new Error("Failed to load ticket details.");
-    return res.json();
+  getTicketDetail(ticketId: number, guildId = DEMO_GUILD) {
+    return request<TicketDetail>(`/tickets/${guildId}/${ticketId}`);
   },
-
-  async createTicket(guildId: string = "support-demo-999", data: any): Promise<Ticket> {
-    const res = await fetch(`${API_URL}/tickets/${guildId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data),
-    });
-    if (!res.ok) throw new Error("Failed to create ticket.");
-    return res.json();
+  createTicket(data: NewTicket, guildId = DEMO_GUILD) {
+    return request<Ticket>(`/tickets/${guildId}`, post(data));
   },
-
-  async claimTicket(guildId: string = "support-demo-999", ticketId: number, agentName: string): Promise<Ticket> {
-    const res = await fetch(`${API_URL}/tickets/${guildId}/${ticketId}/claim`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agent_id: "agent_curr", agent_name: agentName }),
-    });
-    if (!res.ok) throw new Error("Failed to claim ticket.");
-    return res.json();
+  claimTicket(ticketId: number, agentName: string, guildId = DEMO_GUILD) {
+    return request<Ticket>(`/tickets/${guildId}/${ticketId}/claim`, post({ agent_id: "agent_1", agent_name: agentName }));
   },
-
-  async updateStatus(guildId: string = "support-demo-999", ticketId: number, status: string): Promise<Ticket> {
-    const res = await fetch(`${API_URL}/tickets/${guildId}/${ticketId}/status`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
-    });
-    if (!res.ok) throw new Error("Failed to update status.");
-    return res.json();
+  updateStatus(ticketId: number, status: Ticket["status"], guildId = DEMO_GUILD) {
+    return request<Ticket>(`/tickets/${guildId}/${ticketId}/status`, post({ status }));
   },
-
-  async updatePriority(guildId: string = "support-demo-999", ticketId: number, priority: string): Promise<Ticket> {
-    const res = await fetch(`${API_URL}/tickets/${guildId}/${ticketId}/priority`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ priority }),
-    });
-    if (!res.ok) throw new Error("Failed to update priority.");
-    return res.json();
+  updatePriority(ticketId: number, priority: Ticket["priority"], guildId = DEMO_GUILD) {
+    return request<Ticket>(`/tickets/${guildId}/${ticketId}/priority`, post({ priority }));
   },
-
-  async addMessage(guildId: string = "support-demo-999", ticketId: number, content: string, isStaff: boolean): Promise<TicketMessage> {
-    const res = await fetch(`${API_URL}/tickets/${guildId}/${ticketId}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        author_id: isStaff ? "staff_curr" : "cust_curr",
-        author_name: isStaff ? "Staff Support" : "Customer",
-        is_staff: isStaff,
-        content,
-      }),
-    });
-    if (!res.ok) throw new Error("Failed to send message.");
-    return res.json();
+  addMessage(ticketId: number, content: string, author: { id: string; name: string; staff: boolean }, guildId = DEMO_GUILD) {
+    return request<TicketMessage>(`/tickets/${guildId}/${ticketId}/messages`, post({ author_id: author.id, author_name: author.name, is_staff: author.staff, content }));
   },
-
-  async addNote(guildId: string = "support-demo-999", ticketId: number, noteText: string): Promise<InternalNote> {
-    const res = await fetch(`${API_URL}/tickets/${guildId}/${ticketId}/notes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        staff_id: "staff_curr",
-        staff_name: "Staff Support",
-        note_text: noteText,
-      }),
-    });
-    if (!res.ok) throw new Error("Failed to add private note.");
-    return res.json();
+  addNote(ticketId: number, noteText: string, guildId = DEMO_GUILD) {
+    return request<InternalNote>(`/tickets/${guildId}/${ticketId}/notes`, post({ staff_id: "agent_1", staff_name: "Alex Morgan", note_text: noteText }));
   },
-
-  async getOverview(guildId: string = "support-demo-999"): Promise<OverviewStats> {
-    const res = await fetch(`${API_URL}/analytics/${guildId}/overview`);
-    if (!res.ok) throw new Error("Failed to load overview.");
-    return res.json();
+  getOverview(guildId = DEMO_GUILD) {
+    return request<OverviewStats>(`/analytics/${guildId}/overview`);
   },
-
-  async getCategories(guildId: string = "support-demo-999"): Promise<CategoryBreakdown[]> {
-    const res = await fetch(`${API_URL}/analytics/${guildId}/categories`);
-    if (!res.ok) throw new Error("Failed to load categories.");
-    return res.json();
+  getCategories(guildId = DEMO_GUILD) {
+    return request<CategoryBreakdown[]>(`/analytics/${guildId}/categories`);
   },
-
-  async seedDemo(): Promise<void> {
-    const res = await fetch(`${API_URL}/demo/seed`, { method: "POST" });
-    if (!res.ok) throw new Error("Failed to seed demo support data.");
+  seedDemo() {
+    return request<{ message: string; created: boolean }>(`/demo/seed`, { method: "POST" });
   },
 };

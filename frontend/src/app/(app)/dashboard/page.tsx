@@ -1,227 +1,131 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { 
-  Inbox, Search, Filter, Clock, Sparkles, CheckCircle2, 
-  AlertCircle, UserCheck, ArrowRight, LifeBuoy 
-} from "lucide-react";
-import { api, Ticket, OverviewStats } from "@/lib/api";
-import TicketStatusBadge from "@/components/TicketStatusBadge";
-import PriorityBadge from "@/components/PriorityBadge";
+import { toast } from "sonner";
+import { Clock, Inbox, Plus, Search, Sparkles, UserX, Users } from "lucide-react";
+import { NewTicketDialog } from "@/components/new-ticket";
+import { PriorityPill, StatusPill } from "@/components/desk";
+import { SelectField } from "@/components/kit/select-field";
+import { Empty, ErrorState, PageTitle, Panel, RowsLoading, Stat, Table, Tag, Td, Th } from "@/components/kit/ui";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useApi } from "@/hooks/use-api";
+import { useDebounced } from "@/hooks/use-debounced";
+import { api, DEMO_GUILD_NAME } from "@/lib/api";
+import { CATEGORIES, duration, PRIORITIES, relative, STATUSES } from "@/lib/format";
 
-export default function DashboardPage() {
-  const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [stats, setStats] = useState<OverviewStats | null>(null);
+const ALL = "All";
+
+export default function QueuePage() {
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [categoryFilter, setCategoryFilter] = useState("All");
-  const [priorityFilter, setPriorityFilter] = useState("All");
-  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState(ALL);
+  const [category, setCategory] = useState(ALL);
+  const [priority, setPriority] = useState(ALL);
   const [seeding, setSeeding] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const query = useDebounced(search.trim(), 250);
 
-  useEffect(() => {
-    loadData();
-  }, [statusFilter, categoryFilter, priorityFilter, search]);
+  const filters = { status, category, priority, search: query || undefined };
+  const tickets = useApi(() => api.getTickets(filters), JSON.stringify(filters));
+  const stats = useApi(() => api.getOverview(), "overview");
+  const filtered = status !== ALL || category !== ALL || priority !== ALL || query !== "";
 
-  async function loadData() {
-    setLoading(true);
-    try {
-      const [tList, st] = await Promise.all([
-        api.getTickets("support-demo-999", {
-          status: statusFilter,
-          category: categoryFilter,
-          priority: priorityFilter,
-          search: search.trim() || undefined,
-        }),
-        api.getOverview("support-demo-999"),
-      ]);
-      setTickets(tList);
-      setStats(st);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleSeedDemo() {
+  async function seed() {
     setSeeding(true);
     try {
-      await api.seedDemo();
-      await loadData();
+      const result = await api.seedDemo();
+      toast.success(result.created ? "Demo tickets loaded" : "Demo tickets are already loaded");
+      tickets.reload();
+      stats.reload();
     } catch (err) {
-      alert("Failed to seed demo data.");
+      toast.error((err as Error).message);
     } finally {
       setSeeding(false);
     }
   }
 
+  const s = stats.data;
   return (
-    <div className="space-y-8 py-4">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-800/80 pb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Inbox className="w-6 h-6 text-blue-400" />
-            Support Ticket Queue
-          </h1>
-          <p className="text-xs text-zinc-400">
-            Real-time Discord customer support desk for <strong className="text-white">Acme Cloud Technologies</strong>.
-          </p>
-        </div>
+    <>
+      <PageTitle title="Ticket queue" description={<>Every support request from the <strong className="font-medium text-foreground">{DEMO_GUILD_NAME}</strong> Discord server.</>}
+        actions={<>
+          <Button variant="outline" onClick={seed} disabled={seeding}><Sparkles />{seeding ? "Loading…" : "Load demo tickets"}</Button>
+          <Button onClick={() => setCreating(true)}><Plus />New ticket</Button>
+        </>} />
 
-        <button
-          onClick={handleSeedDemo}
-          disabled={seeding}
-          className="px-3.5 py-2 rounded-lg border border-zinc-800 bg-zinc-900 hover:bg-zinc-800 text-xs text-zinc-300 flex items-center gap-1.5 transition disabled:opacity-50 self-start sm:self-auto"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-          {seeding ? "Seeding..." : "Seed Demo Tickets"}
-        </button>
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="Open tickets" icon={Inbox} value={s?.open_tickets_count ?? "—"} hint={s ? `${s.total_tickets_recorded} recorded in total` : undefined} />
+        <Stat label="Unassigned" icon={UserX} value={s?.unassigned_count ?? "—"} tone={s && s.unassigned_count > 0 ? "warn" : undefined} hint="Waiting for an agent to claim" />
+        <Stat label="Waiting on staff" icon={Users} value={s?.waiting_for_staff_count ?? "—"} tone={s && s.waiting_for_staff_count > 0 ? "fail" : undefined} hint="Customer spoke last" />
+        <Stat label="Avg. first response" icon={Clock} value={s ? duration(s.average_first_response_minutes) : "—"} hint="From open to first staff reply" />
       </div>
 
-      {/* SLA Metric Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Open Tickets</span>
-          <p className="text-2xl font-bold text-white">{stats?.open_tickets_count || 0}</p>
-        </div>
-        <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Unassigned</span>
-          <p className="text-2xl font-bold text-amber-400">{stats?.unassigned_count || 0}</p>
-        </div>
-        <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Waiting on Staff</span>
-          <p className="text-2xl font-bold text-rose-400">{stats?.waiting_for_staff_count || 0}</p>
-        </div>
-        <div className="p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 space-y-1">
-          <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Avg First Response</span>
-          <p className="text-2xl font-bold text-blue-400">
-            {stats?.average_first_response_minutes || 0}m
-          </p>
-        </div>
-      </div>
-
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-        <div className="relative flex-1 max-w-sm">
-          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-3" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search ticket #, customer, subject..."
-            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-2 text-xs text-white placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
-          />
+      <Panel bodyClassName="p-0">
+        <div className="grid grid-cols-1 gap-2 border-b p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_170px_170px_140px]">
+          <label className="relative sm:col-span-2 lg:col-span-1">
+            <span className="sr-only">Search tickets</span>
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by ticket #, customer or subject" className="bg-card pl-8" />
+          </label>
+          <SelectField label="Status" value={status} onChange={setStatus} options={[{ value: ALL, label: "All statuses" }, ...STATUSES]} />
+          <SelectField label="Category" value={category} onChange={setCategory} options={[{ value: ALL, label: "All categories" }, ...CATEGORIES]} />
+          <SelectField label="Priority" value={priority} onChange={setPriority} options={[{ value: ALL, label: "All priorities" }, ...PRIORITIES]} />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
-          >
-            <option value="All">All Statuses</option>
-            <option value="Open">Open</option>
-            <option value="Waiting for Staff">Waiting for Staff</option>
-            <option value="Waiting for Customer">Waiting for Customer</option>
-            <option value="In Progress">In Progress</option>
-            <option value="Resolved">Resolved</option>
-            <option value="Closed">Closed</option>
-          </select>
+        {tickets.error ? (
+          <div className="p-4"><ErrorState message={tickets.error} onRetry={tickets.reload} /></div>
+        ) : tickets.loading && !tickets.data ? (
+          <RowsLoading rows={5} />
+        ) : !tickets.data?.length ? (
+          filtered ? (
+            <Empty icon={Search} title="No tickets match these filters" description="Try another status or clear the search." />
+          ) : (
+            <Empty icon={Inbox} title="The queue is empty" description="Load the demo tickets, or open one as a customer would from the Discord support panel."
+              action={<Button onClick={seed} disabled={seeding}><Sparkles />Load demo tickets</Button>} />
+          )
+        ) : (
+          <>
+            <div className="hidden md:block">
+              <Table>
+                <thead><tr><Th>Ticket</Th><Th>Subject</Th><Th>Category</Th><Th>Priority</Th><Th>Status</Th><Th>Assignee</Th><Th className="text-right">Opened</Th></tr></thead>
+                <tbody>
+                  {tickets.data.map((t) => (
+                    <tr key={t.id} className="group hover:bg-muted/40">
+                      <Td className="font-mono text-xs text-muted-foreground">#{t.ticket_number}</Td>
+                      <Td className="max-w-[340px]">
+                        <Link href={`/tickets/${t.id}`} className="block truncate font-medium group-hover:text-primary">{t.subject}</Link>
+                        <span className="text-xs text-muted-foreground">{t.customer_name}</span>
+                      </Td>
+                      <Td><Tag>{t.category}</Tag></Td>
+                      <Td><PriorityPill priority={t.priority} /></Td>
+                      <Td><StatusPill status={t.status} /></Td>
+                      <Td className="text-sm">{t.assigned_agent_name ?? <span className="text-muted-foreground">Unassigned</span>}</Td>
+                      <Td className="text-right text-xs whitespace-nowrap text-muted-foreground">{relative(t.created_at)}</Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
+            <ul className="divide-y md:hidden">
+              {tickets.data.map((t) => (
+                <li key={t.id}>
+                  <Link href={`/tickets/${t.id}`} className="block space-y-2 px-4 py-3.5 hover:bg-muted/40">
+                    <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span className="font-mono">#{t.ticket_number} · {t.customer_name}</span>
+                      <span>{relative(t.created_at)}</span>
+                    </div>
+                    <p className="font-medium">{t.subject}</p>
+                    <div className="flex flex-wrap gap-1.5"><StatusPill status={t.status} /><PriorityPill priority={t.priority} /><Tag>{t.category}</Tag></div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </Panel>
 
-          <select
-            value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
-            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
-          >
-            <option value="All">All Categories</option>
-            <option value="Billing">Billing</option>
-            <option value="Technical Issue">Technical Issue</option>
-            <option value="Purchase Question">Purchase Question</option>
-            <option value="Account Help">Account Help</option>
-          </select>
-
-          <select
-            value={priorityFilter}
-            onChange={(e) => setPriorityFilter(e.target.value)}
-            className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
-          >
-            <option value="All">All Priorities</option>
-            <option value="Low">Low</option>
-            <option value="Normal">Normal</option>
-            <option value="High">High</option>
-            <option value="Urgent">Urgent</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Ticket Table */}
-      {loading ? (
-        <div className="py-24 text-center text-xs text-zinc-500 font-mono">Loading queue records...</div>
-      ) : tickets.length === 0 ? (
-        <div className="py-16 text-center border border-dashed border-zinc-800 rounded-xl text-xs text-zinc-500 font-mono">
-          No support tickets match the current criteria.
-        </div>
-      ) : (
-        <div className="border border-zinc-800 rounded-xl bg-zinc-900/40 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-zinc-950 border-b border-zinc-800 text-zinc-400 font-mono uppercase text-[10px]">
-                <tr>
-                  <th className="py-3 px-4 w-20">Ticket</th>
-                  <th className="py-3 px-4">Subject</th>
-                  <th className="py-3 px-4">Customer</th>
-                  <th className="py-3 px-4">Category</th>
-                  <th className="py-3 px-4">Priority</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Assigned</th>
-                  <th className="py-3 px-4 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800/60">
-                {tickets.map((t) => (
-                  <tr key={t.id} className="hover:bg-zinc-900/80 transition">
-                    <td className="py-3 px-4 font-mono font-bold text-blue-400">
-                      #{t.ticket_number}
-                    </td>
-                    <td className="py-3 px-4">
-                      <Link
-                        href={`/tickets/${t.id}`}
-                        className="font-semibold text-white hover:text-blue-400 transition"
-                      >
-                        {t.subject}
-                      </Link>
-                    </td>
-                    <td className="py-3 px-4 text-zinc-300 font-medium">
-                      {t.customer_name}
-                    </td>
-                    <td className="py-3 px-4 text-zinc-400">{t.category}</td>
-                    <td className="py-3 px-4">
-                      <PriorityBadge priority={t.priority} />
-                    </td>
-                    <td className="py-3 px-4">
-                      <TicketStatusBadge status={t.status} />
-                    </td>
-                    <td className="py-3 px-4 text-zinc-400 font-mono text-[11px]">
-                      {t.assigned_agent_name || <span className="text-zinc-600">Unassigned</span>}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <Link
-                        href={`/tickets/${t.id}`}
-                        className="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-medium transition inline-flex items-center gap-1"
-                      >
-                        Inspect <ArrowRight className="w-3 h-3" />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </div>
+      <NewTicketDialog open={creating} onOpenChange={setCreating} onCreated={() => { tickets.reload(); stats.reload(); }} />
+    </>
   );
 }
