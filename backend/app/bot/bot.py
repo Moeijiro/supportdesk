@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.db.session import AsyncSessionLocal
-from app.db.models import Ticket, TicketMessage
+from app.models import Ticket, TicketMessage
 from app.bot.views import SupportPanelView, TicketControlView
 
 intents = discord.Intents.default()

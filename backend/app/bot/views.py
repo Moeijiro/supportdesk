@@ -3,7 +3,7 @@ from discord import ui
 import datetime
 from sqlalchemy import select
 from app.db.session import AsyncSessionLocal
-from app.db.models import Ticket, TicketMessage, TicketAuditLog
+from app.models import Ticket, TicketMessage, TicketAuditLog
 from app.services.transcript import generate_html_transcript
 
 class TicketModal(ui.Modal, title="Open Support Ticket"):
