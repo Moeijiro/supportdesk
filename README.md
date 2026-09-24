@@ -1,5 +1,7 @@
 # SupportDesk
 
+**Portfolio case study:** [moeijiro.github.io/portfolio/projects/supportdesk](https://moeijiro.github.io/portfolio/projects/supportdesk/) · **Live demo:** not hosted — the app runs locally in a few commands (see below).
+
 **Customer support that lives in your Discord server.** SupportDesk turns a support
 channel into a real ticket queue. Customers open tickets from a panel in Discord and get
 a private thread. Agents claim, reply, prioritise and close tickets from Discord or the
